@@ -7,6 +7,10 @@
 		var_dump($object);
 		echo('</pre>');
 	}
+
+	// TODO: make this a config
+	$currentSeason = 27; 
+
 	const MISSING_NUMBER = 999;
 
 	/*
@@ -87,7 +91,33 @@
 		Type says: crafting.plugs.frame_identifiers
 	*/
 	const SOCKET_CRAFTING = 3583996951;
+	
+	const BUCKET_WEAPONS_KINETIC = 1498876634;
+	const BUCKET_WEAPONS_ENERGY = 2465295065;
+	const BUCKET_WEAPONS_POWER = 953998645;
+	const BUCKET_MODIFICATIONS = 3313201758;
+	const BUCKET_CONSUMABLES = 1469714392; // For some reason weaponperks are in here. Wtf man.
+	const BUCKET_WEAPON_MODS = 2422292810; // For some reason this has no name in the BucketTypes json.
 
+	const WEAPON_BUCKETS = [BUCKET_WEAPONS_KINETIC, BUCKET_WEAPONS_ENERGY, BUCKET_WEAPONS_POWER];
+
+	/*
+		This includes Enhanced weapon mods, like the ones that expire at the end of a season
+	*/
+	const ITEMCATEGORY_MODIFICATIONS = 59;
+	/*
+		regex: type_weapon_mod_all
+		Weapon Mods: Damage
+		These are mods that affect the damage of your weapon, in type and/or amount.
+	*/
+	const ITEMCATEGORY_WEAPON_MODS_DMG = 1052191496;
+	/*
+		Weapon Mods
+		Mods that can be applied to weapons.
+	*/
+	const ITEMCATEGORY_WEAPON_MODS = 610365472;
+
+	const WEAPON_MODS_ITEMCATEGORIES = [ITEMCATEGORY_MODIFICATIONS, ITEMCATEGORY_WEAPON_MODS_DMG, ITEMCATEGORY_WEAPON_MODS];
 
 	enum Bucket : string
 	{
@@ -232,31 +262,97 @@
 	    }
 	}
 
-	function isDefinitionIsValidWeapon($itemDefinition) {
+	class WeaponModDefinition {
+	    public int $hash;
+	    public string $name;
+	    public string $description;
+	    public string $icon;
+    	public string $itemTypeDisplayName;
+    	public string $itemTypeAndTierDisplayName;
+
+    	public int $plugCategoryHash;
+    	public string $plugCategoryIdentifier;
+
+    	public int $perkHash;
+    	public int $itemType;
+
+
+	    public function __construct($hash, $itemDefinition) {
+	    	// Basics, Icons, and Display Properties
+	        $this->hash = (int)$hash;
+	        $this->name = $itemDefinition->displayProperties->name ?? '';
+			$this->description = $itemDefinition->displayProperties->description ?? '';
+			$this->icon = $itemDefinition->displayProperties->icon ?? '';
+			$this->itemTypeDisplayName = $itemDefinition->itemTypeDisplayName ?? '';
+			$this->itemTypeAndTierDisplayName = $itemDefinition->itemTypeAndTierDisplayName ?? '';
+
+			$this->plugCategoryHash = (int)$itemDefinition->plug->plugCategoryHash ?? MISSING_NUMBER;
+			$this->plugCategoryIdentifier = $itemDefinition->plug->plugCategoryIdentifier ?? "";
+			
+			$this->perkHash = (int)$itemDefinition->perks[0]->perkHash ?? MISSING_NUMBER;
+			$this->itemType = $itemDefinition->itemType ?? MISSING_NUMBER;
+	    }
+	}
+
+	class ArtifactPerkDefinition {
+	    public int $hash;
+	    public string $name;
+	    public string $description;
+	    public string $icon;
+    	public string $itemTypeDisplayName;
+    	public string $itemTypeAndTierDisplayName;
+
+    	public int $plugCategoryHash;
+    	public string $plugCategoryIdentifier;
+
+    	public int $perkHash;
+    	public int $itemType;
+
+
+	    public function __construct($hash, $itemDefinition) {
+	    	// Basics, Icons, and Display Properties
+	        $this->hash = (int)$hash;
+	        $this->name = $itemDefinition->displayProperties->name ?? '';
+			$this->description = $itemDefinition->displayProperties->description ?? '';
+			$this->icon = $itemDefinition->displayProperties->icon ?? '';
+			$this->itemTypeDisplayName = $itemDefinition->itemTypeDisplayName ?? '';
+			$this->itemTypeAndTierDisplayName = $itemDefinition->itemTypeAndTierDisplayName ?? '';
+
+			$this->plugCategoryHash = (int)$itemDefinition->plug->plugCategoryHash ?? MISSING_NUMBER;
+			$this->plugCategoryIdentifier = $itemDefinition->plug->plugCategoryIdentifier ?? "";
+			
+			$this->perkHash = (int)$itemDefinition->perks[0]->perkHash ?? MISSING_NUMBER;
+			$this->itemType = $itemDefinition->itemType ?? MISSING_NUMBER;
+	    }
+	}
+
+	function isDefinitionValidWeapon($itemDefinition) {
 		return (isset($itemDefinition->collectibleHash) && isset($itemDefinition->defaultDamageTypeHash));
 	}
 
-	function isDefinitionIsValidWeaponPerk($itemDefinition) {
-		/*
-			perhaps: itemTypeDisplayName == Trait (we already check this before)
-			and
-			itemCategoryHashes = 610365472 (aka "Weapon Mods")
-		*/
-		return (in_array(610365472, $itemDefinition->itemCategoryHashes));
+	const ITEMCATEGORY_WEAPON_PERKS = 610365472;
+	function isDefinitionValidWeaponPerk($itemDefinition) {
+		return (int)$itemDefinition->inventory->bucketTypeHash == BUCKET_CONSUMABLES
+			&& ($itemDefinition->itemTypeDisplayName ?? "") == "Trait"
+			&& in_array(ITEMCATEGORY_WEAPON_PERKS, $itemDefinition->itemCategoryHashes);
 	}
-	function isDefinitionIsValidWeaponMod($itemDefinition) {
-		/*
-			perhaps: itemTypeDisplayName == Weapon Mod
-			and
-			itemCategoryHashes = 59 (aka "Mods")
-			and
-			itemCategoryHashes = 1052191496 (aka "Weapon Mods: Damage")
-			and
-			itemCategoryHashes = 610365472 (aka "Weapon Mods")
-		*/
-		return false;
+
+	/*
+		Checks if the item is a weapon mod
+		Excludes deprecated mods
+	*/
+	function isDefinitionValidWeaponMod($itemDefinition) {
+
+		$plugIdentifier = isset($itemDefinition->plug) ? $itemDefinition->plug->plugCategoryIdentifier : 'noplug';
+
+		return preg_match('/v[0-9]{3,}\.weapon\.mod_[a-z]+/', $plugIdentifier)
+			&& !str_contains($plugIdentifier, "empty");
 	}
-	function isDefinitionIsValidArmorPerk($itemDefinition) {
+
+	/*
+		Checks if the item is an armor perk
+	*/
+	function isDefinitionValidArmorPerk($itemDefinition) {
 		/*
 			perhaps: itemTypeDisplayName == Intrinsic
 			and
@@ -278,41 +374,105 @@
 		return false;
 	}
 
+	/*
+		Checks if the item is an artifact perk from the current season
+	*/
+	function isDefinitionValidArtifactPerk($itemDefinition) {
 
-	const BUCKET_WEAPONS_KINETIC = 1498876634;
-	const BUCKET_WEAPONS_ENERGY = 2465295065;
-	const BUCKET_WEAPONS_POWER = 953998645;
-	const BUCKET_MODIFICATIONS = 3313201758;
-	const BUCKET_CONSUMABLES = 1469714392; // For some reason perks are in here. Wtf man.
+		$plugIdentifier = isset($itemDefinition->plug) ? $itemDefinition->plug->plugCategoryIdentifier : 'noPlug';
+		$itemTypeDisplayName = isset($itemDefinition->itemTypeDisplayName) ? $itemDefinition->itemTypeDisplayName : 'noTypeDisplay';
 
-	const WEAPON_BUCKETS = [BUCKET_WEAPONS_KINETIC, BUCKET_WEAPONS_ENERGY, BUCKET_WEAPONS_POWER];
+		return $itemTypeDisplayName == "Artifact Perk";
+		// actualy for this we find the artifact and then just extract the mods from there
+		// smth easy for once
+		// return preg_match('/v[0-9]{3,}\.weapon\.mod_[a-z]+/', $plugIdentifier)
+		// 	&& !str_contains($plugIdentifier, "empty");
+	}
 
+	// TODO: make this a config
 	$latestManifestFileName = "DestinyInventoryItemDefinition-c927add4-d286-4b35-9496-a3a553584307.json";
 	$itemDefinitions = Items::fromFile('C:\Users\incomescrane\Desktop\\' . $latestManifestFileName);
 
 	$allWeapons = array();
+	$allWeaponPerks = array();
+	$allWeaponMods = array();
 	$startTime = new DateTimeImmutable();
 	foreach ($itemDefinitions as $hash => $itemDefinition) {
+
+		$categoryHashes = isset($itemDefinition->itemCategoryHashes) ? $itemDefinition->itemCategoryHashes : [];
+		// WEAPONS
 		if (in_array((int)$itemDefinition->inventory->bucketTypeHash, WEAPON_BUCKETS)) {
-			if (isDefinitionIsValidWeapon($itemDefinition)) {
+			if (isDefinitionValidWeapon($itemDefinition)) {
 				$weapon = new WeaponDefinition($hash, $itemDefinition);
 				$weapon->setEquipmentBucket($itemDefinition->inventory->bucketTypeHash);
-				prettyVar_Dump($weapon);
+				//prettyVar_Dump($weapon);
 				$allWeapons[] = $weapon;
 			}
 		}
 
-		// TODO: clean up these checks
-		// else if ((int)$itemDefinition->inventory->bucketTypeHash == BUCKET_CONSUMABLES
-		// 	&& ($itemDefinition->itemTypeDisplayName ?? "") == "Trait") {
-		// 	if (isDefinitionIsValidWeaponPerk($itemDefinition)) {
-		// 		$weaponPerk = new PerkDefinition($hash, $itemDefinition);
-		// 		prettyVar_Dump($weaponPerk);
-		// 	}
-		// }
+		// WEAPON PERKS
+		else if (isDefinitionValidWeaponPerk($itemDefinition)) {
+			$weaponPerk = new PerkDefinition($hash, $itemDefinition);
+			$allWeaponPerks[] = $weaponPerk;
+		}
+
+		// SEASONAL ARTIFACT
+		// $categoryHashes = 
+		else if (in_array(1378222069, $categoryHashes)) {
+
+			$label = isset($itemDefinition->inventory->stackUniqueLabel) ? $itemDefinition->inventory->stackUniqueLabel : "noLabel";
+			if (str_contains($label, ("seasons.season".$currentSeason))) {
+				$artifactPerkHashes = array();
+
+				$j = 0;
+				foreach ($itemDefinition->preview->derivedItemCategories as $key => $category) {
+					if(count($category->items) == 17) {
+						// for some reason the perks are in the middle of this list from indexes 10 to 14
+						// only 5 are available at the start of the season
+						$artifactPerkHashes[$j] = array();
+						for ($i = 10; $i < 15; $i++) {
+							$artifactPerkHashes[$j][] = $category->items[$i]->itemHash;
+							// $artifactPerk = new ArtifactPerkDefinition($category->items[$i]->itemHash)
+						}
+						$j++;
+					}
+				}
+				prettyVar_Dump($artifactPerkHashes);
+			}
+			
+			// ARTIFACT PERKS
+			else if (isDefinitionValidArtifactPerk($itemDefinition)) {
+				$artifactPerk = new ArtifactPerkDefinition($hash, $itemDefinition);
+				$allArtifactPerks[] = $artifactPerk;
+				prettyVar_Dump($artifactPerk);
+				echo("\n---------------------------------------\n");
+			}
+		}
+
+		// <ItemCategory "Mods">
+		else if (in_array(59, $categoryHashes)) {
+			// // WEAPON MODS
+			// else if (isDefinitionValidWeaponMod($itemDefinition)) {
+			// 	$weaponMod = new WeaponModDefinition($hash, $itemDefinition);
+			// 	$allWeaponMods[] = $weaponMod;
+			// }
+		}
 	}
+	// Write to files
 	try {
 		file_put_contents('allWeapons.json', json_encode($allWeapons, JSON_THROW_ON_ERROR));
+	}
+	catch (Exception $e) {
+	    echo 'Caught exception: ',  $e->getMessage(), "\n";
+	}
+	try {
+		file_put_contents('allWeaponPerks.json', json_encode($allWeaponPerks, JSON_THROW_ON_ERROR));
+	}
+	catch (Exception $e) {
+	    echo 'Caught exception: ',  $e->getMessage(), "\n";
+	}
+	try {
+		file_put_contents('allWeaponMods.json', json_encode($allWeaponMods, JSON_THROW_ON_ERROR));
 	}
 	catch (Exception $e) {
 	    echo 'Caught exception: ',  $e->getMessage(), "\n";
